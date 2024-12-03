@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LFR Circuit Lap Counter</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link href="style.css" rel="stylesheet" />
+    <link
+      href="https://fonts.cdnfonts.com/css/digital-7-mono"
+      rel="stylesheet"
+    />
+    <link href="https://fonts.cdnfonts.com/css/minecart-lcd" rel="stylesheet" />
+
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
+    <style>
+      #timerDisplay {
+        font-size: 11em;
+        font-weight: bold;
+        font-family: "Digital-7 Mono", sans-serif;
+      }
+      #lapCounter {
+        font-size: 4.5em;
+        font-weight: bold;
+      }
+      .list-group-item {
+        font-size: 1.2em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container mt-5">
+      <!-- <h2>LFR Circuit Lap Counter</h2> -->
+      <!-- Race interface -->
+      <div id="raceInterface" class="mt-4" style="display: none">
+        <div class="row">
+          <div class="col-md-4">
+            <div class="mb-3">
+              <input
+                type="text"
+                class="cyberpunk form-control"
+                id="teamName"
+                placeholder="Enter your team name"
+              />
+            </div>
+            <div class="mb-3">
+              <input
+                type="number"
+                class="cyberpunk form-control"
+                placeholder="Lap Counter"
+                id="lapCount"
+                min="1"
+              />
+            </div>
+            <button id="startRaceBtn" class="btn btn-success cyberpunk red">
+              Start Race
+            </button>
+            <button
+              id="resetBtn"
+              class="btn btn-secondary"
+              style="display: none; margin-top: 10px"
+            >
+              Reset Race
+            </button>
+          </div>
+          <div
+            style="
+              color: white;
+              /* background: grey; */
+              text-shadow: -2px 4px 12px #00000026;
+            "
+            class="col-md-8 text-center"
+          >
+            <div id="timerDisplay">00:00.000</div>
+            <div id="lapCounter">Lap: 0</div>
+          </div>
+        </div>
+
+        <h3 class="mt-4">Lap Times</h3>
+        <ul id="lapTimesList" class="list-group"></ul>
+        <button id="exportBtn" class="btn btn-info mt-3" style="display: none">
+          Export CSV
+        </button>
+      </div>
+
+      <hr />
+      <!-- WebSocket connection input -->
+      <div class="mb-3">
+        <label for="wsAddress" class="form-label">Counter Device Address</label>
+        <input
+          type="text"
+          class="form-control"
+          id="wsAddress"
+          placeholder="ws://localhost:8080"
+        />
+      </div>
+      <button id="connectBtn" class="btn btn-primary">Connect</button>
+      <!-- Connection status -->
+      <p id="connectionStatus" class="mt-4"></p>
+    </div>
+
+    <script>
+      let socket = null;
+      let raceStarted = false;
+      let raceEnded = false;
+      let lapTimes = [];
+      let raceStartTime = null;
+      let currentLap = 0;
+      let raceEndTime = null;
+      let interval = null;
+      let fullRaceStartTime = null; // Track the full race time
+      let lapStartTime = null; // Track the lap time for each lap
+
+      // Connect to WebSocket server
+      document.getElementById("connectBtn").addEventListener("click", () => {
+        const wsAddress = document.getElementById("wsAddress").value;
+        if (!wsAddress) {
+          alert("Please enter a valid WebSocket address.");
+          return;
+        }
+
+        socket = new WebSocket(wsAddress);
+
+        socket.onopen = () => {
+          document.getElementById("connectionStatus").textContent =
+            "Connected to Counter Device";
+          document.getElementById("connectBtn").textContent = "Connected";
+          document.getElementById("connectBtn").disabled = true;
+          document.getElementById("raceInterface").style.display = "block";
+        };
+
+        socket.onclose = () => {
+          document.getElementById("connectionStatus").textContent =
+            "Connection lost. Trying to reconnect...";
+          document.getElementById("connectBtn").textContent = "Reconnect";
+          document.getElementById("connectBtn").disabled = false;
+          document.getElementById("raceInterface").style.display = "none";
+        };
+
+        socket.onerror = () => {
+          document.getElementById("connectionStatus").textContent =
+            "Connection error";
+        };
+
+        socket.onmessage = (event) => {
+          if (event.data === "1" && !raceStarted) {
+            if (!raceEnded) {
+              startRace(); // Start race when LFR crosses the start line
+            }
+          } else if (raceStarted && event.data === "1") {
+            handleLapTime(); // Handle lap time when LFR crosses finish line
+          }
+        };
+      });
+
+      // Start the race when the WebSocket message is received
+      function startRace() {
+        raceStarted = true;
+        currentLap = 0;
+        lapTimes = [];
+        raceStartTime = moment(); // Set the race start time
+        fullRaceStartTime = moment(); // Initialize full race start time
+        lapStartTime = moment(); // Initialize lap start time for the first lap
+        document.getElementById("lapTimesList").innerHTML = ""; // Clear previous lap times
+        document.getElementById("startRaceBtn").disabled = true;
+        document.getElementById("resetBtn").style.display = "none";
+        startTimer();
+      }
+
+      // Handle lap time when first lap is detected
+      function handleLapTime() {
+        currentLap++;
+
+        // Calculate lap time (from lapStartTime to now)
+        const lapTime = moment().diff(lapStartTime);
+        lapTimes.push(lapTime);
+        lapStartTime = moment(); // Reset lap start time for the next lap
+
+        const lapTimeFormatted =
+          moment.duration(lapTime).minutes() +
+          ":" +
+          ("00" + moment.duration(lapTime).seconds()).slice(-2) +
+          "." +
+          ("00" + moment.duration(lapTime).milliseconds()).slice(-2);
+
+        const listItem = document.createElement("li");
+        listItem.classList.add("list-group-item");
+        listItem.innerHTML =
+          "Lap " +
+          currentLap +
+          ": <span class='float-right' style='float: right; font-weight: bold;'>" +
+          lapTimeFormatted +
+          "</span>";
+        document.getElementById("lapTimesList").appendChild(listItem);
+
+        // Update lap counter
+        document.getElementById("lapCounter").textContent =
+          "Lap: " + currentLap;
+
+        // End race if all laps are completed
+        if (currentLap >= document.getElementById("lapCount").value) {
+          raceEndTime = moment();
+          displayRaceResults();
+        }
+      }
+
+      // Start and update timer
+      function startTimer() {
+        interval = setInterval(() => {
+          if (raceStarted) {
+            const currentTime = moment().diff(fullRaceStartTime);
+            const timeFormatted =
+              moment.duration(currentTime).minutes() +
+              ":" +
+              ("00" + moment.duration(currentTime).seconds()).slice(-2) +
+              "." +
+              ("00" + moment.duration(currentTime).milliseconds()).slice(-2);
+            document.getElementById("timerDisplay").textContent = timeFormatted;
+          }
+        }, 10); // Update every 10ms for milliseconds
+      }
+
+      // Display race results
+      function displayRaceResults() {
+        clearInterval(interval);
+        const totalTime = raceEndTime.diff(fullRaceStartTime);
+        const totalFormatted =
+          moment.duration(totalTime).minutes() +
+          ":" +
+          ("00" + moment.duration(totalTime).seconds()).slice(-2) +
+          "." +
+          ("00" + moment.duration(totalTime).milliseconds()).slice(-2);
+
+        const resultItem = document.createElement("li");
+        resultItem.classList.add("list-group-item", "list-group-item-success");
+        resultItem.innerHTML =
+          "Race Completed: <span class='float-right' style='float: right; font-weight: bold;'> Total Time: " + totalFormatted + "</span>";
+
+        document.getElementById("timerDisplay").innerHTML = totalFormatted;
+
+        document.getElementById("lapTimesList").appendChild(resultItem);
+
+        document.getElementById("exportBtn").style.display = "block";
+        document.getElementById("resetBtn").style.display = "block";
+
+        raceStarted = false;
+        raceEnded = true;
+      }
+
+      // Reset race
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        raceStarted = false;
+        raceEnded = false;
+        currentLap = 0;
+        currentLap = 0;
+        lapTimes = [];
+        raceStartTime = null;
+        raceEndTime = null;
+        fullRaceStartTime = null; // Reset full race timer
+        document.getElementById("lapTimesList").innerHTML = "";
+        document.getElementById("lapCounter").textContent = "Lap: 0";
+        document.getElementById("timerDisplay").textContent = "00:00.00";
+        document.getElementById("startRaceBtn").disabled = false;
+        document.getElementById("resetBtn").style.display = "none";
+        document.getElementById("exportBtn").style.display = "none";
+      });
+
+      // Export results to CSV
+      document.getElementById("exportBtn").addEventListener("click", () => {
+        const teamName =
+          document.getElementById("teamName").value.trim() || "Team";
+        let csvContent = "Lap Number, Time (min:sec:ms)\n";
+        lapTimes.forEach((lap, index) => {
+          const lapFormatted =
+            moment.duration(lap).minutes() +
+            ":" +
+            ("00" + moment.duration(lap).seconds()).slice(-2) +
+            "." +
+            ("00" + moment.duration(lap).milliseconds()).slice(-2);
+          csvContent += `${index + 1}, ${lapFormatted}\n`;
+        });
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const link = document.createElement("a");
+        link.setAttribute("href", URL.createObjectURL(blob));
+        link.setAttribute("download", teamName + "_race_results.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    </script>
+  </body>
+</html>
